@@ -1,0 +1,8 @@
+# Store all text files with LF in the repository; check out per-platform by default.
+* text=auto
+
+# Shell scripts must keep LF line endings on EVERY platform. On Windows, Git's
+# default core.autocrlf=true would check out CRLF, and bash (Git Bash, WSL,
+# MSYS2) then fails with "bash\r: bad interpreter" / "$'\r': command not found".
+*.sh   text eol=lf
+*.bash text eol=lf

@@ -3,6 +3,10 @@
 # preflight.sh — Step 0 of the uap-clc3-2026 exercise.
 #
 # Checks, for the CURRENT Azure subscription:
+#   0. that all resource providers the deployment needs are REGISTERED (Azure
+#      for Students subscriptions do NOT pre-register several of them, most
+#      notably Microsoft.CognitiveServices — an unregistered RP makes the
+#      bicep deployment fail with 'ResourceProviderNotRegistered')
 #   1. which regions the subscription is ALLOWED to deploy to (Azure Policy
 #      "Allowed resource deployment regions" / "Allowed locations")
 #   2. which regions actually offer the services we need (Flex Consumption,
@@ -25,7 +29,8 @@
 # scripts/README.md) and continues. It never hard-fails.
 #
 # Requirements: Azure CLI (az), jq, GitHub CLI (gh, authenticated) for step 6.
-# Run inside the devcontainer or any shell with those installed:
+# Run inside the devcontainer or any shell with those installed (on Windows:
+# Git Bash, WSL or the devcontainer — .gitattributes keeps *.sh on LF endings):
 #   bash scripts/preflight.sh            # full run incl. GitHub wiring
 #   bash scripts/preflight.sh --skip-gh  # region/quota checks only
 # =============================================================================
@@ -65,6 +70,46 @@ info "subscription: $SUBNAME ($SUB)"
 # display-name -> region-name map (provider APIs return display names)
 az account list-locations --query "[].{name: name, displayName: displayName}" -o json > "$TMPD/locations.json" 2>/dev/null \
   || az account list-locations -o json > "$TMPD/locations.json"
+
+# --- 0b. register the resource providers the deployment needs -----------------
+# Azure for Students subscriptions do NOT pre-register all resource providers
+# (most notably Microsoft.CognitiveServices). An unregistered RP makes the
+# bicep deployment fail with 'ResourceProviderNotRegistered', and step 2's
+# 'az provider show' region lists are only complete once the RP is registered.
+# Registration is async -> register everything first, then wait for 'Registered'.
+info "Step 0b: registering required resource providers (Cognitive Services is NOT pre-registered on Azure for Students) ..."
+REQUIRED_RPS="Microsoft.App Microsoft.Authorization Microsoft.CognitiveServices Microsoft.ContainerRegistry Microsoft.DocumentDB Microsoft.EventGrid Microsoft.Insights Microsoft.OperationalInsights Microsoft.Resources Microsoft.Storage Microsoft.Web"
+for rp in $REQUIRED_RPS; do
+  state="$(az provider show --namespace "$rp" --query registrationState -o tsv 2>/dev/null || echo Unknown)"
+  if [ "$state" = "Registered" ]; then
+    info "  $rp: already registered"
+  else
+    info "  $rp: $state -> az provider register ..."
+    if ! az provider register --namespace "$rp" >/dev/null 2>&1; then
+      warn "could not register $rp (needs Contributor or Owner on the subscription — you are Owner on your own student subscription)"
+      manual "Register resource providers: portal -> Subscriptions -> your subscription -> Resource providers -> select the RP -> Register; or CLI: az provider register --namespace $rp. Full list: $REQUIRED_RPS. See scripts/README.md section 0."
+    fi
+  fi
+done
+# wait for registration (async, can take a few minutes) — poll up to ~5 min
+info "waiting for resource provider registration to complete (up to 5 min) ..."
+PENDING_RPS="$REQUIRED_RPS"
+WAITED=0
+while [ -n "$PENDING_RPS" ] && [ "$WAITED" -lt 300 ]; do
+  PENDING_RPS=""
+  for rp in $REQUIRED_RPS; do
+    state="$(az provider show --namespace "$rp" --query registrationState -o tsv 2>/dev/null || echo Unknown)"
+    [ "$state" = "Registered" ] || PENDING_RPS="$PENDING_RPS $rp"
+  done
+  [ -z "$PENDING_RPS" ] && break
+  sleep 10; WAITED=$((WAITED + 10))
+done
+if [ -n "$PENDING_RPS" ]; then
+  warn "still not registered after ~5 min:$PENDING_RPS"
+  manual "Re-check: az provider show --namespace <NS> --query registrationState -o tsv (portal: Subscriptions -> your subscription -> Resource providers). Registration can take longer — wait a few minutes and re-run this script. See scripts/README.md section 0."
+else
+  info "all required resource providers are Registered."
+fi
 
 # --- 1. allowed regions from Azure Policy ------------------------------------
 # POLICY_STATE: restricted = policy list read | none = no such assignment (verified)

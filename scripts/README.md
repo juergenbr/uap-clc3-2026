@@ -10,6 +10,43 @@ You need: Azure CLI (`az`, https://aka.ms/installazurecli) logged in to your
 `az account set --subscription <id>`), and the Azure portal
 (https://portal.azure.com) plus the Foundry portal (https://ai.azure.com).
 
+On **Windows** run the script from Git Bash (ships with Git for Windows), WSL,
+or the devcontainer: `bash scripts/preflight.sh`. The repo's `.gitattributes`
+forces LF line endings for `*.sh`, so the script behaves the same on Windows and
+Linux/macOS — bash fails on CRLF, so do not convert the file. (If you cloned
+before `.gitattributes` existed and the script already has CRLF endings,
+re-check it out: `git rm --cached scripts/preflight.sh && git checkout -- scripts/preflight.sh`.)
+
+## 0. Register the resource providers the deployment needs
+
+Azure for Students subscriptions do **not** pre-register all resource providers —
+most notably **Microsoft.CognitiveServices** (Foundry). An unregistered resource
+provider makes the bicep deployment fail with `ResourceProviderNotRegistered`.
+
+`preflight.sh` step 0b registers these automatically and waits until every one
+shows `Registered`:
+
+```
+Microsoft.App  Microsoft.Authorization  Microsoft.CognitiveServices
+Microsoft.ContainerRegistry  Microsoft.DocumentDB  Microsoft.EventGrid
+Microsoft.Insights  Microsoft.OperationalInsights  Microsoft.Resources
+Microsoft.Storage  Microsoft.Web
+```
+
+- **CLI (manual equivalent):**
+  ```bash
+  for rp in Microsoft.App Microsoft.Authorization Microsoft.CognitiveServices \
+            Microsoft.ContainerRegistry Microsoft.DocumentDB Microsoft.EventGrid \
+            Microsoft.Insights Microsoft.OperationalInsights Microsoft.Resources \
+            Microsoft.Storage Microsoft.Web; do
+    az provider register --namespace "$rp"   # async — poll until Registered:
+    az provider show --namespace "$rp" --query registrationState -o tsv
+  done
+  ```
+- **Portal:** Subscriptions → your subscription → **Resource providers** →
+  select each provider above → **Register** (wait until the state is `Registered`;
+  this can take a few minutes).
+
 ## 1. Which regions are you allowed to deploy to?
 
 Azure for Students subscriptions have an Azure Policy assignment that restricts
